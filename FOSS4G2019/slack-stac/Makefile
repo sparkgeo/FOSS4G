@@ -15,4 +15,5 @@ update-lambda-config:
 		--function-name slack-stac \
 		--region us-east-1 \
 		--handler slack-stac-lambda.lambda_handler \
-		--description "Slack slash command to query a STAC catalog"
+		--description "Slack slash command to query a STAC catalog" \
+		--environment '{"Variables":{"api_url":"${SLACKSTAC_API_URL}"}}'
