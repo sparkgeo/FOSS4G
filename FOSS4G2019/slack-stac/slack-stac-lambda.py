@@ -6,19 +6,19 @@ import os
 
 print('Loading function')
 
-api_url =  os.environ['api_url']
+api_url =  os.environ.get('api_url')
 
 def respond(err, res=None):
-    print('RETURNED TEXT: ', res["text"])
-    print('RETURNED ATTACHMENTS: ', res['attachments'])
+    print('RETURNED TEXT: ', res.get("text"))
+    print('RETURNED ATTACHMENTS: ', res.get('attachments'))
 
     permanency = ["in_channel", "emphemeral"]
 
     requests.post(
         res['response_url'],
         data='{{"text": "{}", "attachments": {}, "response_type": "{}"}}'.format(
-            res["text"],
-            json.dumps(res["attachments"]),
+            res.get("text"),
+            json.dumps(res.get("attachments")),
             permanency[1]
         ),
         headers= {
@@ -44,7 +44,7 @@ def create_session():
 def make_request(endpoint):
     session = create_session()
 
-    result = session.request(endpoint['method'], endpoint['url'])
+    result = session.request(endpoint.get('method'), endpoint.get('url'))
     data = result.json()
 
     return data
@@ -82,11 +82,12 @@ def format_simple_attachments(payload):
 
 def format_complex_attachments(payload, iterable):
     attachments = []
-    for item in payload[iterable]:
-
+    for item in payload.get(iterable):
+        print('ITEM:', item)
         image_url = item.get('assets')
+        print('IMAGE_URL:', image_url)
         if image_url:
-            image_url = image_url['thumbnail']['href']
+            image_url = image_url.get('thumbnail').get('href')
 
         fields, title = format_fields(item)
 
@@ -97,7 +98,7 @@ def format_complex_attachments(payload, iterable):
 def lambda_handler(event, context):
     print("Received event: " + json.dumps(event, indent=2))
 
-    print("BODY:", event['body'])
+    print("BODY:", event.get('body'))
 
     operations = ['POST']
 
@@ -118,24 +119,25 @@ def lambda_handler(event, context):
         }
     }
 
-    operation = event['httpMethod']
+    operation = event.get('httpMethod')
     if operation in operations:
-        body_dict = urllib.parse.parse_qs(event['body'])
+        body_dict = urllib.parse.parse_qs(event.get('body'))
         print(body_dict)
 
-        endpoint_type = body_dict['text'][0]
-        endpoint = endpoints[endpoint_type]
+        endpoint_type = body_dict.get('text')[0]
+        endpoint = endpoints.get(endpoint_type)
 
+        print('ENDPOINT:', endpoint)
         payload = make_request(endpoint)
 
         if endpoint_type in ["search", "collections"]:
-            iterable = endpoints[endpoint_type]["iterable"]
+            iterable = endpoints.get(endpoint_type).get("iterable")
             payload = format_complex_attachments(payload, iterable)
         elif endpoint_type in ["info"]:
             payload = format_simple_attachments(payload)
 
         payload["text"] = "STAC Query Results:"
-        payload['response_url'] = body_dict['response_url'][0]
+        payload['response_url'] = body_dict.get('response_url')[0]
 
         response = respond(None, payload)
         print('RESPONSE:', response)
