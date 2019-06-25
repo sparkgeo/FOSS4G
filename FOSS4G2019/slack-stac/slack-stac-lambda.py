@@ -41,10 +41,10 @@ def create_session():
     return session
 
 
-def make_request(endpoint):
+def make_request(endpoint, data=None):
     session = create_session()
 
-    result = session.request(endpoint.get('method'), endpoint.get('url'))
+    result = session.request(endpoint.get('method'), endpoint.get('url'), data=data)
     data = result.json()
 
     return data
@@ -123,12 +123,17 @@ def lambda_handler(event, context):
     if operation in operations:
         body_dict = urllib.parse.parse_qs(event.get('body'))
         print(body_dict)
+        body_text = body_dict.get('text')[0].split(' ')
 
-        endpoint_type = body_dict.get('text')[0]
+        endpoint_type = body_text[0]
         endpoint = endpoints.get(endpoint_type)
-
         print('ENDPOINT:', endpoint)
-        payload = make_request(endpoint)
+
+        body_data = body_text[1].replace("'", '"') if len(body_text) > 1 else None
+        print('BODY DATA:', body_data)
+
+        payload = make_request(endpoint, body_data)
+        print('PAYLOAD:', payload)
 
         if endpoint_type in ["search", "collections"]:
             iterable = endpoints.get(endpoint_type).get("iterable")
