@@ -9,16 +9,14 @@ print('Loading function')
 api_url =  os.environ.get('api_url')
 
 def respond(err, res=None):
-    print('RETURNED TEXT: ', res.get("text"))
-    print('RETURNED ATTACHMENTS: ', res.get('attachments'))
+    print('RETURNED BLOCKS: ', res.get('blocks'))
 
     permanency = ["in_channel", "emphemeral"]
 
     requests.post(
         res['response_url'],
-        data='{{"text": "{}", "attachments": {}, "response_type": "{}"}}'.format(
-            res.get("text"),
-            json.dumps(res.get("attachments")),
+        data='{{"blocks": {}, "response_type": "{}"}}'.format(
+            json.dumps(res.get("blocks")),
             permanency[1]
         ),
         headers= {
@@ -49,51 +47,112 @@ def make_request(endpoint, data=None):
 
     return data
 
-def format_fields(field_dict):
-    fields = []
-    title = None
 
-    for key, value in field_dict.items():
-        if key == "id":
-            title = value
-        else:
-            fields.append(
-                {
-                    "title": key,
-                    "value": json.dumps(value),
-                    "short": False
+def format_simple_block(payload):
+    self_link = [i.get('href') for i in payload.get('links') if i.get('rel') == 'self'][0]
+
+    return {
+        "blocks": [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*<{self_link}|{payload.get('title')}>*\n{payload.get('description')}\nSTAC Version: {payload.get('stac_version')}"
+                },
+                "accessory": {
+                    "type": "image",
+                    "image_url": "http://sparkgeo.com/wp-content/uploads/2018/10/favicon-sparkgeo.png",
+                    "alt_text": "Sparkgeo"
                 }
-            )
-    return (fields, title)
-
-def create_attachment(title=None, image_url=None, fields=None, footer=None):
-   return {
-        "title": title,
-        "image_url": image_url,
-        "fields": fields,
-        "footer": footer
+            }
+        ]
     }
 
-def format_simple_attachments(payload):
-    fields, title = format_fields(payload)
-    attachments = [create_attachment(fields=fields)]
 
-    return {"attachments": attachments}
+def format_feature(payload):
+    self_link = [i.get('href') for i in payload.get('links') if i.get('rel') == 'self'][0]
 
-def format_complex_attachments(payload, iterable):
-    attachments = []
+    assets = payload.get('assets')
+
+    if assets:
+        if assets.get('thumbnail'):
+            image_url = assets.get('thumbnail').get('href')
+        else:
+            image_url = None
+        downloads = ' | '.join([f"*<{v.get('href')}|{v.get('title')}>*" for k,v in assets.items()])
+
+    return [
+        {
+            "type": "divider"
+        }, {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    f"*<{self_link}|{payload.get('id')}>*\n"
+                    f"*Timestamp*: {payload.get('properties').get('datetime')}\n"
+                    f"*Collection*: {payload.get('properties').get('collection')}\n"
+                    f"*Cloud Cover*: {payload.get('properties').get('eo:cloud_cover')}\n"
+                    f"*Bounding Box*: {payload.get('bbox')}\n"
+                    f"*Downloads*: {downloads}"
+                )
+            },
+            "accessory": {
+                "type": "image",
+                "image_url": image_url,
+                "alt_text": payload.get('id')
+            }
+        }
+    ]
+
+
+def format_collection(payload):
+    self_link = [i.get('href') for i in payload.get('links') if i.get('rel') == 'self'][0]
+
+    return [
+        {
+            "type": "divider"
+        },{
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    f"*<{self_link}|{payload.get('title')}>*\n"
+                    f"{payload.get('description')}\n"
+                )
+            },
+            "accessory": {
+                "type": "image",
+                "image_url": "http://sparkgeo.com/wp-content/uploads/2018/10/favicon-sparkgeo.png",
+                "alt_text": "Sparkgeo"
+            }
+        }
+    ]
+
+
+def format_complex_blocks(payload, iterable):
+    found_count = payload.get('meta').get('found')
+    returned_count = payload.get('meta').get('returned')
+    blocks = [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"Found *{found_count}* {iterable}. Showing *{returned_count}* results."
+            }
+        }
+    ]
+
     for item in payload.get(iterable):
         print('ITEM:', item)
-        image_url = item.get('assets')
-        print('IMAGE_URL:', image_url)
-        if image_url:
-            image_url = image_url.get('thumbnail').get('href')
 
-        fields, title = format_fields(item)
+        if iterable == 'collections':
+            blocks += format_collection(item)
+        elif iterable == 'features':
+            blocks += format_feature(item)
 
-        attachments.append(create_attachment(title, image_url, fields, title))
+    return {"blocks": blocks}
 
-    return {"attachments": attachments}
 
 def lambda_handler(event, context):
     print("Received event: " + json.dumps(event, indent=2))
@@ -123,6 +182,7 @@ def lambda_handler(event, context):
     if operation in operations:
         body_dict = urllib.parse.parse_qs(event.get('body'))
         print(body_dict)
+
         body_text = body_dict.get('text')[0].split(' ')
 
         endpoint_type = body_text[0]
@@ -137,11 +197,26 @@ def lambda_handler(event, context):
 
         if endpoint_type in ["search", "collections"]:
             iterable = endpoints.get(endpoint_type).get("iterable")
-            payload = format_complex_attachments(payload, iterable)
+            payload = format_complex_blocks(payload, iterable)
         elif endpoint_type in ["info"]:
-            payload = format_simple_attachments(payload)
+            payload = format_simple_block(payload)
 
-        payload["text"] = "STAC Query Results:"
+        if body_data:
+            payload['blocks'] += [
+                {
+                    "type": "divider"
+                }, {
+                    "type": "context",
+                    "elements": [
+                        {
+                            "type": "mrkdwn",
+                            "text": f"Query: {body_data}"
+                        }
+                    ]
+                }
+            ]
+
+
         payload['response_url'] = body_dict.get('response_url')[0]
 
         response = respond(None, payload)
